@@ -11,6 +11,7 @@ from langchain_classic.chains import create_history_aware_retriever, create_retr
 from langchain_classic.chains.combine_documents import create_stuff_documents_chain
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import HumanMessage, AIMessage
+from tenacity import retry, stop_after_attempt, wait_exponential
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -138,6 +139,23 @@ def log_error(error_msg, doc_info="General"):
     with open("error_logs.txt", "a", encoding="utf-8") as f:
         f.write(log_entry)
 
+class RobustEmbeddings(GoogleGenerativeAIEmbeddings):
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        reraise=True
+    )
+    def embed_documents(self, texts):
+        return super().embed_documents(texts)
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        reraise=True
+    )
+    def embed_query(self, text):
+        return super().embed_query(text)
+
 def initialize_session_state():
     if "messages" not in st.session_state:
         st.session_state.messages = []
@@ -181,7 +199,7 @@ def process_documents(uploaded_files, api_key):
         # Create Vector Store with Chroma
         import time
         time.sleep(1) # Small delay to stabilize connection
-        embeddings = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-001", google_api_key=api_key)
+        embeddings = RobustEmbeddings(model="models/gemini-embedding-001", google_api_key=api_key)
         vector_store = Chroma.from_documents(splits, embeddings)
         
         return vector_store

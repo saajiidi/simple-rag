@@ -121,7 +121,7 @@ def process_documents(uploaded_files, api_key):
         splits = text_splitter.split_documents(documents)
         
         # Create Vector Store
-        embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=api_key)
+        embeddings = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-001", google_api_key=api_key)
         vector_store = FAISS.from_documents(splits, embeddings)
         
         return vector_store

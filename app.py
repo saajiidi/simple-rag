@@ -1,6 +1,8 @@
 import streamlit as st
 import os
 import tempfile
+import traceback
+from datetime import datetime
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
@@ -16,69 +18,125 @@ load_dotenv()
 
 # Page configuration
 st.set_page_config(
-    page_title="IntelliDocs | Premium RAG Assistant",
+    page_title="IntelliDocs | Modern RAG",
     page_icon="🧠",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Custom Styling
+# Custom Styling (Premium Light Mode)
 st.markdown("""
     <style>
+    @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap');
+
+    html, body, [class*="css"] {
+        font-family: 'Outfit', sans-serif;
+    }
+
     /* Main background */
     .stApp {
-        background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
-        color: #f8fafc;
+        background-color: #fdfdfe;
+        background-image: radial-gradient(at 0% 0%, hsla(253,16%,7%,0.03) 0, transparent 50%), 
+                          radial-gradient(at 50% 0%, hsla(225,39%,30%,0.03) 0, transparent 50%), 
+                          radial-gradient(at 100% 0%, hsla(339,49%,30%,0.03) 0, transparent 50%);
     }
     
     /* Sidebar styling */
     section[data-testid="stSidebar"] {
-        background-color: rgba(30, 41, 59, 0.5) !important;
-        backdrop-filter: blur(10px);
-        border-right: 1px solid rgba(255, 255, 255, 0.1);
+        background-color: #ffffff !important;
+        border-right: 1px solid #f1f5f9;
+        padding-top: 1rem;
     }
     
     /* Title styling */
     .main-title {
-        background: linear-gradient(90deg, #38bdf8, #818cf8);
+        font-family: 'Outfit', sans-serif;
+        background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
         font-weight: 800;
-        font-size: 3rem;
-        margin-bottom: 0rem;
+        font-size: 3.5rem;
+        letter-spacing: -2px;
+        margin-bottom: 0.1rem;
     }
     
-    /* Chat message containers */
-    .stChatMessage {
-        border-radius: 15px;
-        margin-bottom: 1rem;
-        padding: 1rem;
+    .subtitle {
+        color: #64748b;
+        font-size: 1.1rem;
+        margin-bottom: 2rem;
     }
     
-    /* Custom buttons */
+    /* Message Bubbles */
+    [data-testid="stChatMessage"] {
+        background-color: transparent !important;
+        border: none !important;
+        padding: 0.5rem 0 !important;
+    }
+    
+    .stChatMessageContent {
+        border-radius: 18px !important;
+        padding: 1.2rem !important;
+        font-size: 1rem !important;
+        line-height: 1.6 !important;
+        max-width: 85%;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05) !important;
+    }
+    
+    [data-testid="stChatMessageAssistant"] .stChatMessageContent {
+        background: #ffffff !important;
+        border: 1px solid #f1f5f9 !important;
+        color: #1e293b !important;
+    }
+    
+    [data-testid="stChatMessageUser"] .stChatMessageContent {
+        background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%) !important;
+        color: white !important;
+        margin-left: auto;
+    }
+
+    /* Input Box */
+    .stChatInputContainer {
+        border-radius: 15px !important;
+        border: 1px solid #e2e8f0 !important;
+        background: white !important;
+        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05) !important;
+        padding: 5px !important;
+    }
+
+    /* Primary Button Styling */
     .stButton>button {
-        border-radius: 10px;
-        background: linear-gradient(90deg, #0ea5e9, #6366f1);
+        width: 100%;
+        border-radius: 12px;
+        background: #0f172a;
         color: white;
+        font-weight: 600;
         border: none;
-        transition: all 0.3s ease;
+        padding: 0.6rem 0;
+        transition: all 0.2s ease;
     }
     .stButton>button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
+        background: #1e293b;
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(15, 23, 42, 0.15);
     }
-    
-    /* Glassmorphism card */
+
+    /* Glass Cards */
     .glass-card {
-        background: rgba(255, 255, 255, 0.05);
-        backdrop-filter: blur(10px);
-        border-radius: 15px;
+        background: #ffffff;
+        border-radius: 16px;
         padding: 1.5rem;
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        margin-bottom: 1rem;
+        border: 1px solid #f1f5f9;
+        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.04);
     }
     </style>
 """, unsafe_allow_html=True)
+
+def log_error(error_msg, doc_info="General"):
+    """Saves detailed error logs to error_logs.txt"""
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    log_entry = f"\n{'='*50}\n[{timestamp}] ERROR in {doc_info}\n{'-'*50}\n{error_msg}\n{traceback.format_exc()}\n{'='*50}\n"
+    with open("error_logs.txt", "a", encoding="utf-8") as f:
+        f.write(log_entry)
 
 def initialize_session_state():
     if "messages" not in st.session_state:
@@ -126,12 +184,13 @@ def process_documents(uploaded_files, api_key):
         
         return vector_store
     except Exception as e:
+        log_error(str(e), "Document Processing")
         st.error(f"Error processing documents: {str(e)}")
         return None
 
 def get_rag_chain(vector_store, api_key):
     llm = ChatGoogleGenerativeAI(
-        model="gemini-1.5-pro",
+        model="models/gemini-flash-latest",
         google_api_key=api_key,
         temperature=0.3
     )
@@ -257,6 +316,7 @@ def main():
                                 AIMessage(content=answer)
                             ])
                 except Exception as e:
+                    log_error(str(e), "Response Generation")
                     st.error(f"Error during response generation: {str(e)}")
             else:
                 st.warning("Please upload and index documents first!")

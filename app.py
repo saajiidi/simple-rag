@@ -5,8 +5,10 @@ from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain_community.vectorstores import FAISS
-from langchain.chains import ConversationalRetrievalChain
-from langchain.memory import ConversationBufferMemory
+from langchain_classic.chains import create_history_aware_retriever, create_retrieval_chain
+from langchain_classic.chains.combine_documents import create_stuff_documents_chain
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.messages import HumanMessage, AIMessage
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -127,6 +129,55 @@ def process_documents(uploaded_files, api_key):
         st.error(f"Error processing documents: {str(e)}")
         return None
 
+def get_rag_chain(vector_store, api_key):
+    llm = ChatGoogleGenerativeAI(
+        model="gemini-1.5-pro",
+        google_api_key=api_key,
+        temperature=0.3
+    )
+    
+    # 1. History-aware retriever
+    contextualize_q_system_prompt = (
+        "Given a chat history and the latest user question "
+        "which might reference context in the chat history, "
+        "formulate a standalone question which can be understood "
+        "without the chat history. Do NOT answer the question, "
+        "just reformulate it if needed and otherwise return it as is."
+    )
+    contextualize_q_prompt = ChatPromptTemplate.from_messages(
+        [
+            ("system", contextualize_q_system_prompt),
+            MessagesPlaceholder("chat_history"),
+            ("human", "{input}"),
+        ]
+    )
+    history_aware_retriever = create_history_aware_retriever(
+        llm, vector_store.as_retriever(), contextualize_q_prompt
+    )
+    
+    # 2. Main Q&A chain
+    system_prompt = (
+        "You are an assistant for question-answering tasks. "
+        "Use the following pieces of retrieved context to answer "
+        "the question. If you don't know the answer, say that you "
+        "don't know. Use three sentences maximum and keep the "
+        "answer concise."
+        "\n\n"
+        "{context}"
+    )
+    qa_prompt = ChatPromptTemplate.from_messages(
+        [
+            ("system", system_prompt),
+            MessagesPlaceholder("chat_history"),
+            ("human", "{input}"),
+        ]
+    )
+    question_answer_chain = create_stuff_documents_chain(llm, qa_prompt)
+    
+    # 3. Final RAG chain
+    rag_chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
+    return rag_chain
+
 def main():
     initialize_session_state()
     
@@ -180,22 +231,12 @@ def main():
         if google_api_key:
             if st.session_state.vector_store:
                 try:
-                    llm = ChatGoogleGenerativeAI(
-                        model="gemini-1.5-pro",
-                        google_api_key=google_api_key,
-                        temperature=0.3
-                    )
-                    
-                    qa_chain = ConversationalRetrievalChain.from_llm(
-                        llm=llm,
-                        retriever=st.session_state.vector_store.as_retriever(),
-                        return_source_documents=True
-                    )
+                    rag_chain = get_rag_chain(st.session_state.vector_store, google_api_key)
                     
                     with st.chat_message("assistant"):
                         with st.spinner("Thinking..."):
-                            response = qa_chain.invoke({
-                                "question": prompt,
+                            response = rag_chain.invoke({
+                                "input": prompt,
                                 "chat_history": st.session_state.chat_history
                             })
                             
@@ -204,14 +245,17 @@ def main():
                             
                             # Display sources
                             with st.expander("🔍 View Sources"):
-                                for i, doc in enumerate(response["source_documents"]):
+                                for i, doc in enumerate(response["context"]):
                                     st.markdown(f"**Source {i+1}:**")
                                     st.caption(doc.page_content[:500] + "...")
                                     st.divider()
                             
                             # Update history
                             st.session_state.messages.append({"role": "assistant", "content": answer})
-                            st.session_state.chat_history.append((prompt, answer))
+                            st.session_state.chat_history.extend([
+                                HumanMessage(content=prompt),
+                                AIMessage(content=answer)
+                            ])
                 except Exception as e:
                     st.error(f"Error during response generation: {str(e)}")
             else:

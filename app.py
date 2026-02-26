@@ -265,9 +265,12 @@ def main():
         st.image("https://cdn-icons-png.flaticon.com/512/2103/2103633.png", width=80)
         st.title("Configuration")
         
-        google_api_key = st.text_input("Enter Google API Key", type="password")
+        # Get default from env or use provided fallback
+        default_key = os.getenv("GOOGLE_API_KEY", "")
+        
+        google_api_key = st.text_input("Enter Google API Key", value=default_key, type="password")
         if not google_api_key:
-            st.warning("Please enter your Google API Key to proceed.")
+            st.warning("No API key detected. Please enter a key to proceed.")
             st.info("You can get a free key from [Google AI Studio](https://aistudio.google.com/app/apikey)")
         
         st.divider()

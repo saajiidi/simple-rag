@@ -6,7 +6,7 @@ from datetime import datetime
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
-from langchain_community.vectorstores import FAISS
+from langchain_community.vectorstores import Chroma
 from langchain_classic.chains import create_history_aware_retriever, create_retrieval_chain
 from langchain_classic.chains.combine_documents import create_stuff_documents_chain
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -178,9 +178,11 @@ def process_documents(uploaded_files, api_key):
         )
         splits = text_splitter.split_documents(documents)
         
-        # Create Vector Store
+        # Create Vector Store with Chroma
+        import time
+        time.sleep(1) # Small delay to stabilize connection
         embeddings = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-001", google_api_key=api_key)
-        vector_store = FAISS.from_documents(splits, embeddings)
+        vector_store = Chroma.from_documents(splits, embeddings)
         
         return vector_store
     except Exception as e:
